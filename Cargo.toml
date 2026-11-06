@@ -1,0 +1,16 @@
+[package]
+name = "usiem-parsers"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Log parsers for uSIEM: Linux daemons, network appliances and Windows event log JSON."
+license = "MIT"
+
+[dependencies]
+usiem = { path = "../usiem", features = ["json"] }
+regex = "1"
+serde_json = "1"
+time = { version = "0.3", features = ["parsing", "macros"] }
+
+[profile.dev.package."*"]
+opt-level = 2
