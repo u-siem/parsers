@@ -1,0 +1,31 @@
+[package]
+name = "usiem-parsers-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+usiem = { version = "0.1", git = "https://github.com/u-siem/usiem", rev = "853e48b0900612e2cce0ba750adb38d9bb6c2650", features = ["json"] }
+usiem-parsers = { path = ".." }
+
+# Not part of the crate's (non-existent) workspace.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "parse_line"
+path = "fuzz_targets/parse_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "windows_json"
+path = "fuzz_targets/windows_json.rs"
+test = false
+doc = false
+bench = false

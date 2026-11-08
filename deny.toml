@@ -1,0 +1,34 @@
+# cargo-deny: https://embarkstudios.github.io/cargo-deny/
+# Run with `cargo deny check`. CI runs it on every push and pull request.
+
+[graph]
+all-features = true
+
+[advisories]
+# Every RustSec advisory (vulnerable, unmaintained, unsound, yanked) fails.
+unmaintained = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Permissive licenses only, compatible with distributing this MIT crate.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    # unicode-ident (through the `time` macros) carries the Unicode data
+    # license alongside MIT/Apache-2.0.
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The uSIEM core is pinned by revision from its public repository.
+allow-git = ["https://github.com/u-siem/usiem"]
