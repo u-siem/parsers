@@ -107,7 +107,7 @@ fn action_of(channel: &str, id: i64) -> Option<&'static str> {
         ("Security", 1102) | ("System", 104) => "audit-log-cleared",
         ("Security", 4624) => "logged-in",
         ("Security", 4625) => "logon-failed",
-        ("Security", 4634) | ("Security", 4647) => "logged-out",
+        ("Security", 4634 | 4647) => "logged-out",
         ("Security", 4648) => "logged-in-explicit",
         ("Security", 4672) => "logged-in-special",
         ("Security", 4688) => "process-created",
@@ -118,8 +118,8 @@ fn action_of(channel: &str, id: i64) -> Option<&'static str> {
         ("Security", 4724) => "reset-password",
         ("Security", 4725) => "disabled-user-account",
         ("Security", 4726) => "deleted-user-account",
-        ("Security", 4728) | ("Security", 4732) | ("Security", 4756) => "added-member-to-group",
-        ("Security", 4729) | ("Security", 4733) | ("Security", 4757) => "removed-member-from-group",
+        ("Security", 4728 | 4732 | 4756) => "added-member-to-group",
+        ("Security", 4729 | 4733 | 4757) => "removed-member-from-group",
         ("Security", 4740) => "locked-out-user-account",
         ("Security", 4768) => "kerberos-authentication-ticket-requested",
         ("Security", 4769) => "kerberos-service-ticket-requested",
@@ -177,6 +177,11 @@ fn as_int(value: &Value) -> Option<i64> {
     }
 }
 
+/// A port number as a field, if it is one (0 to 65535).
+fn port_of(port: i64) -> Option<FieldValue> {
+    u16::try_from(port).ok().map(|p| FieldValue::Int(p.into()))
+}
+
 /// Windows writes `-` for "none".
 fn present(text: &str) -> Option<&str> {
     let text = text.trim();
@@ -210,10 +215,6 @@ fn parse_time(text: &str, utc: bool) -> Option<Timestamp> {
     use time::format_description::FormatItem;
     use time::macros::format_description;
     use time::{OffsetDateTime, PrimitiveDateTime};
-    let text = text.trim();
-    if let Ok(t) = Timestamp::from_rfc3339(text) {
-        return Some(t);
-    }
     const WITH_OFFSET: &[&[FormatItem<'_>]] = &[
         format_description!(
             "[year]-[month]-[day] [hour]:[minute]:[second].[subsecond] [offset_hour sign:mandatory][offset_minute]"
@@ -232,10 +233,14 @@ fn parse_time(text: &str, utc: bool) -> Option<Timestamp> {
         format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond]"),
         format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"),
     ];
+    let text = text.trim();
+    if let Ok(t) = Timestamp::from_rfc3339(text) {
+        return Some(t);
+    }
     let nanos = WITH_OFFSET
         .iter()
         .find_map(|fmt| OffsetDateTime::parse(text, fmt).ok())
-        .map(|dt| dt.unix_timestamp_nanos())
+        .map(OffsetDateTime::unix_timestamp_nanos)
         .or_else(|| {
             utc.then(|| {
                 NO_OFFSET
@@ -479,8 +484,8 @@ pub fn parse_windows_json(mut raw: RawEvent) -> ParseResult {
     if let Some(ip) = get("IpAddress").as_deref().and_then(ip_of) {
         out.push((f::SOURCE_IP, ip));
     }
-    if let Some(port) = get_int("IpPort").filter(|p| *p > 0) {
-        out.push((f::SOURCE_PORT, FieldValue::Int(port)));
+    if let Some(port) = get_int("IpPort").filter(|p| *p > 0).and_then(port_of) {
+        out.push((f::SOURCE_PORT, port));
     }
     if let Some(name) = get("WorkstationName").filter(|s| present(s).is_some()) {
         out.push((f::SOURCE_DOMAIN, name.into()));
@@ -491,14 +496,14 @@ pub fn parse_windows_json(mut raw: RawEvent) -> ParseResult {
     if let Some(ip) = get("SourceIp").as_deref().and_then(ip_of) {
         out.push((f::SOURCE_IP, ip));
     }
-    if let Some(port) = get_int("SourcePort") {
-        out.push((f::SOURCE_PORT, FieldValue::Int(port)));
+    if let Some(port) = get_int("SourcePort").and_then(port_of) {
+        out.push((f::SOURCE_PORT, port));
     }
     if let Some(ip) = get("DestinationIp").as_deref().and_then(ip_of) {
         out.push((f::DESTINATION_IP, ip));
     }
-    if let Some(port) = get_int("DestinationPort") {
-        out.push((f::DESTINATION_PORT, FieldValue::Int(port)));
+    if let Some(port) = get_int("DestinationPort").and_then(port_of) {
+        out.push((f::DESTINATION_PORT, port));
     }
     if let Some(name) = get("DestinationHostname").filter(|s| present(s).is_some()) {
         out.push((f::DESTINATION_DOMAIN, name.into()));
@@ -585,6 +590,8 @@ pub fn parse_windows_json(mut raw: RawEvent) -> ParseResult {
     ParseResult::Success(raw.into_event())
 }
 
+/// [`parse_windows_json`] as a [`LogParser`] named `windows_json`, ready to
+/// register.
 pub fn windows_json_parser() -> LogParser {
     LogParser::new(
         "windows_json",
@@ -613,8 +620,7 @@ mod tests {
 
     fn s(e: &CoreEvent, field: &str) -> String {
         e.get_field(field)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| panic!("missing {field}"))
+            .map_or_else(|| panic!("missing {field}"), ToString::to_string)
     }
 
     const NXLOG_4625: &str = r#"{"EventTime":"2026-11-05 10:00:00 +0100","Hostname":"DESKTOP-1.home.lan","Keywords":"9227830359843504128","EventType":"AUDIT_FAILURE","SeverityValue":4,"Severity":"ERROR","EventID":4625,"SourceName":"Microsoft-Windows-Security-Auditing","RecordNumber":123456,"ProcessID":712,"Channel":"Security","Message":"An account failed to log on.","SubjectUserSid":"S-1-0-0","SubjectUserName":"-","SubjectDomainName":"-","TargetUserName":"admin","TargetDomainName":"DESKTOP-1","Status":"0xc000006d","FailureReason":"%%2313","LogonType":"3","WorkstationName":"KALI","IpAddress":"192.168.1.66","IpPort":"0","EventReceivedTime":"2026-11-05 10:00:01","SourceModuleName":"eventlog","SourceModuleType":"im_msvistalog"}"#;
@@ -699,6 +705,19 @@ mod tests {
         );
         assert_eq!(s(&e, f::DNS_QUESTION_NAME), "evil.example");
         assert_eq!(s(&e, f::EVENT_CATEGORY), "network");
+    }
+
+    #[test]
+    fn ports_out_of_range_are_dropped() {
+        let e = parse(
+            r#"{"EventID":3,"Channel":"Microsoft-Windows-Sysmon/Operational","SourceIp":"10.0.0.5","SourcePort":-1,"DestinationIp":"10.0.0.6","DestinationPort":70000}"#,
+        );
+        assert!(e.get_field(f::SOURCE_PORT).is_none());
+        assert!(e.get_field(f::DESTINATION_PORT).is_none());
+        let e = parse(r#"{"EventID":4625,"Channel":"Security","IpPort":"65536"}"#);
+        assert!(e.get_field(f::SOURCE_PORT).is_none());
+        let e = parse(r#"{"EventID":4625,"Channel":"Security","IpPort":"65535"}"#);
+        assert_eq!(s(&e, f::SOURCE_PORT), "65535");
     }
 
     #[test]

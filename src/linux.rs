@@ -19,9 +19,11 @@ use usiem::event::field::{FieldValue, Ip};
 use usiem::event::fields as f;
 use usiem::ingest::parser::{LogParser, result::ParseResult};
 
-/// `event.dataset` of each parser.
+/// `event.dataset` of the events [`parse_sshd`] produces.
 pub const SSHD_DATASET: &str = "linux.sshd";
+/// `event.dataset` of the events [`parse_sudo`] produces.
 pub const SUDO_DATASET: &str = "linux.sudo";
+/// `event.dataset` of the events [`parse_netfilter`] produces.
 pub const NETFILTER_DATASET: &str = "linux.netfilter";
 
 /// The syslog program name, without any `[pid]`.
@@ -47,18 +49,21 @@ fn port_value(text: &str) -> Option<FieldValue> {
 
 // ---------------------------------------------------------------- sshd
 
+// The user name is the client's to choose and may contain ` from <ip> port
+// <n>`, so it is matched greedily: the address is the last `from`, the one
+// sshd wrote.
 static SSHD_LOGIN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(Accepted|Failed) (\S+) for (invalid user )?(.*?) from (\S+) port (\d+)(?: (ssh\d?))?",
+        r"^(Accepted|Failed) (\S+) for (invalid user )?(.*) from (\S+) port (\d+)(?: (ssh\d?))?",
     )
     .expect("sshd login regex")
 });
 static SSHD_INVALID: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[Ii]nvalid user (.*?) from (\S+)(?: port (\d+))?").expect("sshd invalid regex")
+    Regex::new(r"^[Ii]nvalid user (.*) from (\S+)(?: port (\d+))?").expect("sshd invalid regex")
 });
 static SSHD_MAX_TRIES: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(?:error: )?maximum authentication attempts exceeded for (invalid user )?(.*?) from (\S+) port (\d+)",
+        r"^(?:error: )?maximum authentication attempts exceeded for (invalid user )?(.*) from (\S+) port (\d+)",
     )
     .expect("sshd max tries regex")
 });
@@ -136,6 +141,7 @@ pub fn parse_sshd(mut raw: RawEvent) -> ParseResult {
     ParseResult::Success(raw.into_event())
 }
 
+/// [`parse_sshd`] as a [`LogParser`] named `sshd`, ready to register.
 pub fn sshd_parser() -> LogParser {
     LogParser::new(
         "sshd",
@@ -247,6 +253,7 @@ pub fn parse_sudo(mut raw: RawEvent) -> ParseResult {
     ParseResult::Success(raw.into_event())
 }
 
+/// [`parse_sudo`] as a [`LogParser`] named `sudo`, ready to register.
 pub fn sudo_parser() -> LogParser {
     LogParser::new(
         "sudo",
@@ -274,12 +281,15 @@ pub fn sudo_parser() -> LogParser {
 /// `destination.port`.
 pub fn parse_netfilter(mut raw: RawEvent) -> ParseResult {
     let text = raw.log_text.as_str();
-    let Some(at) = text.find("IN=") else {
+    // The first `IN=` that starts a token: a prefix such as `LOGIN=` or
+    // `BIN=` is not the interface key.
+    let Some(at) = text
+        .match_indices("IN=")
+        .map(|(i, _)| i)
+        .find(|&i| i == 0 || text[..i].ends_with(' '))
+    else {
         return ParseResult::NoMatch(raw);
     };
-    if at > 0 && !text[..at].ends_with(' ') {
-        return ParseResult::NoMatch(raw);
-    }
     let prefix = log_prefix(&text[..at]);
     let mut fields: Vec<(&'static str, FieldValue)> = Vec::with_capacity(10);
     let (mut src, mut dst) = (false, false);
@@ -361,6 +371,9 @@ fn prefix_action(prefix: &str) -> &'static str {
     }
 }
 
+/// [`parse_netfilter`] as a [`LogParser`] named `netfilter`, ready to
+/// register. It matches on content, not on the program name, so register it
+/// after the parsers that check the program first.
 pub fn netfilter_parser() -> LogParser {
     LogParser::new(
         "netfilter",
@@ -390,8 +403,7 @@ mod tests {
 
     fn s(e: &CoreEvent, field: &str) -> String {
         e.get_field(field)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| panic!("missing {field}"))
+            .map_or_else(|| panic!("missing {field}"), ToString::to_string)
     }
 
     #[test]
@@ -424,6 +436,32 @@ mod tests {
             "Failed none for invalid user a b from 192.0.2.4 port 22 ssh2",
         )));
         assert_eq!(s(&e, f::USER_NAME), "a b");
+    }
+
+    #[test]
+    fn sshd_user_name_cannot_spoof_the_source() {
+        // The client picks the user name; sshd appends the real address.
+        for line in [
+            "Failed password for invalid user x from 203.0.113.66 port 1 from 192.0.2.4 port 22 ssh2",
+            "Invalid user x from 203.0.113.66 port 1 from 192.0.2.4 port 22",
+            "maximum authentication attempts exceeded for invalid user x from 203.0.113.66 port 1 from 192.0.2.4 port 22 ssh2 [preauth]",
+        ] {
+            let e = ok(parse_sshd(raw("sshd", line)));
+            assert_eq!(s(&e, f::SOURCE_IP), "192.0.2.4", "{line}");
+            assert_eq!(s(&e, f::SOURCE_PORT), "22", "{line}");
+            assert_eq!(s(&e, f::USER_NAME), "x from 203.0.113.66 port 1", "{line}");
+        }
+    }
+
+    #[test]
+    fn netfilter_key_must_start_a_token() {
+        // `LOGIN=` in the prefix is not `IN=`; the real key follows.
+        let e = ok(parse_netfilter(raw(
+            "kernel",
+            "LOGIN=x IN=eth0 OUT= SRC=10.0.0.5 DST=10.0.0.1 PROTO=TCP SPT=1 DPT=2",
+        )));
+        assert_eq!(s(&e, f::OBSERVER_INGRESS_INTERFACE), "eth0");
+        assert_eq!(s(&e, f::RULE_NAME), "LOGIN=x");
     }
 
     #[test]

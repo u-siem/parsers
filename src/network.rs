@@ -16,9 +16,11 @@ use usiem::event::field::{FieldValue, Ip};
 use usiem::event::fields as f;
 use usiem::ingest::parser::{LogParser, result::ParseResult};
 
-/// `event.dataset` of each parser.
+/// `event.dataset` of the events [`parse_filterlog`] produces.
 pub const FILTERLOG_DATASET: &str = "pfsense.filterlog";
+/// `event.dataset` of the DNS events [`parse_dnsmasq`] produces.
 pub const DNSMASQ_DNS_DATASET: &str = "dnsmasq.dns";
+/// `event.dataset` of the DHCP events [`parse_dnsmasq`] produces.
 pub const DNSMASQ_DHCP_DATASET: &str = "dnsmasq.dhcp";
 
 /// The syslog program name, without any `[pid]`.
@@ -43,14 +45,36 @@ fn port_value(text: &str) -> Option<FieldValue> {
 }
 
 /// `aa:bb:cc:dd:ee:ff` → `AA-BB-CC-DD-EE-FF` (the ECS form); `None` if it
-/// isn't six hex pairs.
+/// isn't six hex pairs separated by `:` or `-`.
+///
+/// ```
+/// use usiem_parsers::network::normalize_mac;
+///
+/// assert_eq!(normalize_mac("aa:bb:cc:dd:ee:0f").as_deref(), Some("AA-BB-CC-DD-EE-0F"));
+/// assert_eq!(normalize_mac("laptop"), None);
+/// ```
 pub fn normalize_mac(text: &str) -> Option<String> {
+    // Six pairs and five separators; anything else is not a MAC, and is not
+    // worth splitting.
+    if text.len() != 17 {
+        return None;
+    }
     let parts: Vec<&str> = text.split([':', '-']).collect();
     let valid = parts.len() == 6
         && parts
             .iter()
             .all(|p| p.len() == 2 && p.bytes().all(|b| b.is_ascii_hexdigit()));
     valid.then(|| parts.join("-").to_ascii_uppercase())
+}
+
+/// A dnsmasq answer that is a status rather than data: `NXDOMAIN`,
+/// `SERVFAIL`, `REFUSED`, `NODATA`, and the `NODATA-IPv4` / `NODATA-IPv6`
+/// dnsmasq writes for an empty `A` / `AAAA` answer.
+fn is_response_code(answer: &str) -> bool {
+    answer.starts_with("NODATA-IPv")
+        || answer
+            .bytes()
+            .all(|c| c.is_ascii_uppercase() || c == b'-' || c.is_ascii_digit())
 }
 
 // ---------------------------------------------------------------- filterlog
@@ -143,6 +167,8 @@ pub fn parse_filterlog(mut raw: RawEvent) -> ParseResult {
     ParseResult::Success(raw.into_event())
 }
 
+/// [`parse_filterlog`] as a [`LogParser`] named `pfsense_filterlog`, ready
+/// to register.
 pub fn filterlog_parser() -> LogParser {
     LogParser::new(
         "pfsense_filterlog",
@@ -291,10 +317,7 @@ pub fn parse_dnsmasq(mut raw: RawEvent) -> ParseResult {
             fields.push((f::DNS_ANSWER_DATA, answer.to_string().into()));
         } else if let Some(kind) = answer.strip_prefix('<').and_then(|a| a.strip_suffix('>')) {
             fields.push((f::DNS_ANSWER_TYPE, kind.to_string().into()));
-        } else if answer
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c == '-' || c.is_ascii_digit())
-        {
+        } else if is_response_code(answer) {
             fields.push((f::DNS_RESPONSE_CODE, answer.to_string().into()));
         } else {
             fields.push((f::DNS_ANSWER_DATA, answer.to_string().into()));
@@ -310,6 +333,7 @@ pub fn parse_dnsmasq(mut raw: RawEvent) -> ParseResult {
     ParseResult::Success(raw.into_event())
 }
 
+/// [`parse_dnsmasq`] as a [`LogParser`] named `dnsmasq`, ready to register.
 pub fn dnsmasq_parser() -> LogParser {
     LogParser::new(
         "dnsmasq",
@@ -341,8 +365,7 @@ mod tests {
 
     fn s(e: &CoreEvent, field: &str) -> String {
         e.get_field(field)
-            .map(|v| v.to_string())
-            .unwrap_or_else(|| panic!("missing {field}"))
+            .map_or_else(|| panic!("missing {field}"), ToString::to_string)
     }
 
     #[test]
@@ -461,6 +484,18 @@ mod tests {
         )));
         assert_eq!(s(&e, f::EVENT_ACTION), "dns_local");
         assert_eq!(s(&e, f::EVENT_REASON), "/etc/hosts");
+    }
+
+    #[test]
+    fn dnsmasq_nodata_is_a_response_code() {
+        for code in ["NODATA-IPv4", "NODATA-IPv6", "NODATA", "SERVFAIL"] {
+            let e = ok(parse_dnsmasq(raw(
+                "dnsmasq",
+                &format!("reply nope.example is {code}"),
+            )));
+            assert_eq!(s(&e, f::DNS_RESPONSE_CODE), code);
+            assert!(e.get_field(f::DNS_ANSWER_DATA).is_none());
+        }
     }
 
     #[test]
