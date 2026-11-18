@@ -16,6 +16,7 @@ const PARSERS: &[Parse] = &[
     linux::parse_netfilter,
     network::parse_filterlog,
     network::parse_dnsmasq,
+    network::parse_unbound,
     windows::parse_windows_json,
 ];
 
@@ -26,6 +27,7 @@ const PROGRAMS: &[Option<&str>] = &[
     Some("kernel"),
     Some("filterlog"),
     Some("dnsmasq"),
+    Some("unbound"),
     None,
 ];
 
@@ -51,6 +53,13 @@ const LINES: &[&str] = &[
     "Jan  5 10:00:00 dnsmasq[812]: query[A] example.com from 192.168.1.20",
     "3164425723 DHCPDISCOVER(eth0) aa:bb:cc:dd:ee:0f no address available",
     "DHCPACK(eth0) 192.168.1.50 aa:bb:cc:dd:ee:0f laptop",
+    "[74764:7] query: 192.0.2.20 www.example.com. A IN",
+    "[74764:7] reply: 2001:db8::20 www.example.com. HTTPS IN NOERROR 0.061264 1 192",
+    "[76589:0] info: 192.0.2.30 b._dns-sd._udp.0.2.0.192.in-addr.arpa. PTR IN NXDOMAIN 0.000000 1 116",
+    "[1:2] info: ads.example. always_nxdomain 192.0.2.40@53211 tracker.ads.example. A IN",
+    "[1:3] error: SERVFAIL <broken.example. A IN>: all the configured stub or forward servers failed",
+    "[76589:0] info: server stats for thread 6: requestlist max 0 avg 0 exceeded 0 jostled 0",
+    "Nov 18 22:00:00 unbound[812]: [812:1] query: 192.0.2.20 example.com. A IN",
     r#"{"EventTime":"2026-11-05 10:00:00 +0100","Hostname":"DESKTOP-1","Keywords":"9227830359843504128","EventType":"AUDIT_FAILURE","Severity":"ERROR","EventID":4625,"SourceName":"Microsoft-Windows-Security-Auditing","RecordNumber":123456,"Channel":"Security","TargetUserName":"admin","TargetDomainName":"DESKTOP-1","LogonType":"3","WorkstationName":"KALI","IpAddress":"::ffff:192.168.1.66","IpPort":"4242"}"#,
     r#"{"EventID":4732,"Channel":"Security","MemberName":"-","TargetUserName":"Administrators","SubjectUserName":"alice","SubjectDomainName":"HOME"}"#,
     r#"{"EventID":4688,"Channel":"Security","NewProcessId":"0x1a2b","NewProcessName":"C:\\Windows\\System32\\cmd.exe","ProcessId":"0x10","ParentProcessName":"C:\\Windows\\explorer.exe","CommandLine":"cmd.exe /c whoami"}"#,

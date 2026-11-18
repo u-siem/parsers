@@ -7,6 +7,13 @@ with no prefix (`0.1.0`).
 
 ## [Unreleased]
 
+### Added
+
+- `network`: Unbound DNS queries and replies (with or without
+  `log-tag-queryreply`), local-zone actions and SERVFAIL lines, as
+  `unbound.dns`; its other lines, such as the statistics it writes when it
+  stops, go to `unbound.log` instead of staying unparsed.
+
 ## [0.1.0]
 
 First public release.

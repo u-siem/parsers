@@ -13,7 +13,7 @@
 //! - [`linux`]: OpenSSH `sshd`, `sudo`, and netfilter (`iptables`,
 //!   `nftables`, UFW) `LOG` lines.
 //! - [`network`]: the pfSense / OPNsense packet filter (`filterlog`) and
-//!   dnsmasq (DNS and DHCP, as Pi-hole runs it).
+//!   dnsmasq (DNS and DHCP, as Pi-hole runs it), and the Unbound resolver.
 //! - [`windows`]: Windows event log records as NXLog or Fluent Bit ship
 //!   them in JSON.
 //!
@@ -43,6 +43,7 @@
 //! registry.register(linux::sudo_parser());
 //! registry.register(network::filterlog_parser());
 //! registry.register(network::dnsmasq_parser());
+//! registry.register(network::unbound_parser());
 //! registry.register(windows::windows_json_parser());
 //! // Content-matched, so after the parsers that check the program name.
 //! registry.register(linux::netfilter_parser());

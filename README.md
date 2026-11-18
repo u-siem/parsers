@@ -12,9 +12,10 @@ Log parsers for [uSIEM](https://github.com/u-siem/usiem): content parsers that t
 | `linux` | `netfilter_parser()` | kernel `LOG` lines from iptables, nftables and UFW | `event.action` (`allowed`/`blocked`), `source.ip`, `destination.ip`, ports, `network.transport` |
 | `network` | `filterlog_parser()` | pfSense / OPNsense `filterlog` CSV, IPv4 and IPv6 | `event.action`, `network.direction`, `rule.id`, `rule.uuid`, `observer.ingress.interface`, addresses and ports |
 | `network` | `dnsmasq_parser()` | dnsmasq and Pi-hole DNS queries, replies and DHCP, also embedded in another line | `dns.question.name`, `dns.resolved_ip`, `dns.response_code`, `client.ip`, `client.mac`, `client.domain` |
+| `network` | `unbound_parser()` | Unbound queries, replies (tagged or not), local-zone actions and SERVFAIL; other Unbound lines (statistics, service messages) go to `unbound.log` | `dns.question.name`, `dns.question.type`, `dns.response_code`, `source.ip`, `event.duration`, `rule.name` |
 | `windows` | `windows_json_parser()` | Windows event log JSON from NXLog (flattened) or Fluent Bit (`StringInserts`) | `winlog.*`, every EventData member as `winlog.event_data.<Name>`, and the well-known ones mapped to ECS |
 
-`sshd`, `sudo`, `filterlog` and `dnsmasq` check the syslog program name first, so for other programs they cost one string comparison.
+`sshd`, `sudo`, `filterlog`, `dnsmasq` and `unbound` check the syslog program name first, so for other programs they cost one string comparison.
 
 ## Use
 
@@ -45,6 +46,7 @@ registry.register(linux::sshd_parser());
 registry.register(linux::sudo_parser());
 registry.register(network::filterlog_parser());
 registry.register(network::dnsmasq_parser());
+registry.register(network::unbound_parser());
 registry.register(windows::windows_json_parser());
 registry.register(linux::netfilter_parser());
 ```
