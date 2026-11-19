@@ -604,9 +604,9 @@ pub fn windows_json_parser() -> LogParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use usiem::event::{CoreEvent, Origin};
+    use usiem::event::{Event, Origin};
 
-    fn parse(json: &str) -> CoreEvent {
+    fn parse(json: &str) -> Event {
         let raw = RawEvent::new(
             json.into(),
             Timestamp::from_secs(1),
@@ -618,7 +618,7 @@ mod tests {
         }
     }
 
-    fn s(e: &CoreEvent, field: &str) -> String {
+    fn s(e: &Event, field: &str) -> String {
         e.get_field(field)
             .map_or_else(|| panic!("missing {field}"), ToString::to_string)
     }
